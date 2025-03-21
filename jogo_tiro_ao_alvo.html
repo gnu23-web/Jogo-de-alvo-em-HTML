@@ -1,0 +1,316 @@
+<!DOCTYPE html><html lang="pt-BR"><head><meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://code.jquery.com https://unpkg.com https://d3js.org https://threejs.org https://cdn.plot.ly https://stackpath.bootstrapcdn.com https://maps.googleapis.com https://cdn.tailwindcss.com https://ajax.googleapis.com https://kit.fontawesome.com https://cdn.datatables.net https://maxcdn.bootstrapcdn.com https://code.highcharts.com https://tako-static-assets-production.s3.amazonaws.com https://www.youtube.com https://fonts.googleapis.com https://fonts.gstatic.com https://pfst.cf2.poecdn.net https://puc.poecdn.net https://i.imgur.com https://wikimedia.org https://*.icons8.com https://*.giphy.com https://picsum.photos https://images.unsplash.com; frame-src 'self' https://www.youtube.com https://trytako.com; child-src 'self'; manifest-src 'self'; worker-src 'self'; upgrade-insecure-requests; block-all-mixed-content;">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jogo de Alvos</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#5D5CDE',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            touch-action: manipulation;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            overscroll-behavior: none;
+        }
+        .target {
+            position: absolute;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .target:active {
+            transform: scale(0.9);
+        }
+        @keyframes pop {
+            0% { transform: scale(0); }
+            70% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        .pop-in {
+            animation: pop 0.3s ease-out;
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+        .score-animation {
+            position: absolute;
+            animation: fadeOut 0.8s ease-out forwards;
+            pointer-events: none;
+        }
+        .dark .instructions-container, .dark .game-over-container {
+            background-color: rgba(30, 30, 30, 0.9);
+        }
+        .instructions-container, .game-over-container {
+            background-color: rgba(255, 255, 255, 0.9);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden relative bg-gray-100 dark:bg-gray-900">
+    <!-- Verifica modo escuro -->
+    <script>
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+        }
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+            if (event.matches) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        });
+    </script>
+
+    <!-- Interface do jogo -->
+    <div class="game-container h-full w-full relative">
+        <!-- Painel de pontuação -->
+        <div class="score-panel fixed top-0 left-0 right-0 p-4 flex justify-between items-center z-10 bg-white/70 dark:bg-black/70 backdrop-blur-sm">
+            <div class="score text-2xl font-bold text-primary">
+                Pontos: <span id="score">0</span>
+            </div>
+            <div class="timer text-2xl font-semibold text-gray-700 dark:text-gray-300">
+                Tempo: <span id="timer">30</span>s
+            </div>
+        </div>
+
+        <!-- Área do jogo -->
+        <div id="game-area" class="h-full w-full pt-16"></div>
+
+        <!-- Tela de início com instruções -->
+        <div id="instructions-screen" class="instructions-container absolute inset-0 flex flex-col items-center justify-center p-6 z-20">
+            <div class="text-center max-w-md">
+                <h1 class="text-3xl font-bold text-primary mb-6">Jogo de Alvos</h1>
+                <p class="text-lg mb-6 text-gray-800 dark:text-gray-200">Toque nos alvos coloridos que aparecem na tela para marcar pontos antes que o tempo acabe!</p>
+                <p class="text-md mb-8 text-gray-700 dark:text-gray-300">Você tem 30 segundos. Alvos menores valem mais pontos!</p>
+                <button id="start-button" class="bg-primary hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-full text-xl shadow-lg transition transform hover:scale-105">
+                    Iniciar Jogo
+                </button>
+            </div>
+        </div>
+
+        <!-- Tela de fim de jogo -->
+        <div id="game-over-screen" class="game-over-container absolute inset-0 flex flex-col items-center justify-center p-6 z-20 hidden">
+            <div class="text-center max-w-md">
+                <h2 class="text-3xl font-bold text-primary mb-4">Fim de Jogo!</h2>
+                <p class="text-xl mb-2 text-gray-800 dark:text-gray-200">Sua pontuação final:</p>
+                <p id="final-score" class="text-4xl font-bold text-primary mb-6">0</p>
+                <button id="replay-button" class="bg-primary hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-full text-xl shadow-lg transition transform hover:scale-105">
+                    Jogar Novamente
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Elementos da interface
+            const gameArea = document.getElementById('game-area');
+            const scoreElement = document.getElementById('score');
+            const timerElement = document.getElementById('timer');
+            const startButton = document.getElementById('start-button');
+            const instructionsScreen = document.getElementById('instructions-screen');
+            const gameOverScreen = document.getElementById('game-over-screen');
+            const finalScoreElement = document.getElementById('final-score');
+            const replayButton = document.getElementById('replay-button');
+            
+            // Variáveis do jogo
+            let score = 0;
+            let timeLeft = 30;
+            let gameInterval;
+            let timerInterval;
+            let gameActive = false;
+            let targets = [];
+            
+            // Cores dos alvos
+            const targetColors = [
+                'bg-red-500',
+                'bg-blue-500',
+                'bg-green-500',
+                'bg-yellow-500',
+                'bg-pink-500',
+                'bg-purple-500',
+                'bg-indigo-500'
+            ];
+            
+            // Função para iniciar o jogo
+            function startGame() {
+                score = 0;
+                timeLeft = 30;
+                gameActive = true;
+                scoreElement.textContent = score;
+                timerElement.textContent = timeLeft;
+                
+                // Esconde a tela de instruções
+                instructionsScreen.classList.add('hidden');
+                gameOverScreen.classList.add('hidden');
+                
+                // Remove alvos anteriores
+                clearTargets();
+                
+                // Cria alvos periodicamente
+                gameInterval = setInterval(createTarget, 850);
+                
+                // Atualiza o timer
+                timerInterval = setInterval(() => {
+                    timeLeft--;
+                    timerElement.textContent = timeLeft;
+                    
+                    if (timeLeft <= 0) {
+                        endGame();
+                    }
+                }, 1000);
+                
+                // Cria alguns alvos iniciais
+                for (let i = 0; i < 3; i++) {
+                    setTimeout(() => {
+                        if (gameActive) createTarget();
+                    }, i * 400);
+                }
+            }
+            
+            // Função para terminar o jogo
+            function endGame() {
+                gameActive = false;
+                clearInterval(gameInterval);
+                clearInterval(timerInterval);
+                
+                // Exibe a tela de fim de jogo
+                finalScoreElement.textContent = score;
+                gameOverScreen.classList.remove('hidden');
+                
+                // Remove alvos existentes
+                clearTargets();
+            }
+            
+            // Função para limpar todos os alvos
+            function clearTargets() {
+                const existingTargets = document.querySelectorAll('.target');
+                existingTargets.forEach(target => {
+                    target.remove();
+                });
+                targets = [];
+            }
+            
+            // Função para criar um alvo
+            function createTarget() {
+                if (!gameActive) return;
+                
+                // Dimensões do alvo (alvos menores valem mais pontos)
+                const size = Math.floor(Math.random() * 3); // 0, 1, 2 (pequeno, médio, grande)
+                const targetSizes = [40, 60, 80]; // pixels
+                const targetPoints = [5, 3, 1]; // pontos
+                
+                const targetSize = targetSizes[size];
+                const points = targetPoints[size];
+                
+                // Posição aleatória dentro da área visível do jogo
+                const gameRect = gameArea.getBoundingClientRect();
+                const maxX = gameRect.width - targetSize;
+                const maxY = gameRect.height - targetSize;
+                
+                const left = Math.floor(Math.random() * maxX);
+                const top = Math.floor(Math.random() * maxY);
+                
+                // Cor aleatória do alvo
+                const colorClass = targetColors[Math.floor(Math.random() * targetColors.length)];
+                
+                // Cria o elemento do alvo
+                const target = document.createElement('div');
+                target.className = `target ${colorClass} pop-in`;
+                target.style.width = `${targetSize}px`;
+                target.style.height = `${targetSize}px`;
+                target.style.left = `${left}px`;
+                target.style.top = `${top}px`;
+                target.dataset.points = points;
+                
+                // Adiciona o número dentro do alvo
+                const pointsText = document.createElement('span');
+                pointsText.className = 'font-bold text-white';
+                pointsText.textContent = `${points}`;
+                target.appendChild(pointsText);
+                
+                // Adiciona o alvo ao jogo
+                gameArea.appendChild(target);
+                targets.push(target);
+                
+                // Remove o alvo depois de um tempo
+                const disappearTime = 1200 + Math.random() * 1000;
+                setTimeout(() => {
+                    if (target.parentNode === gameArea) {
+                        target.style.opacity = '0';
+                        target.style.transform = 'scale(0.5)';
+                        target.style.transition = 'all 0.3s ease-out';
+                        
+                        setTimeout(() => {
+                            if (target.parentNode === gameArea) {
+                                gameArea.removeChild(target);
+                                targets = targets.filter(t => t !== target);
+                            }
+                        }, 300);
+                    }
+                }, disappearTime);
+                
+                // Evento de toque
+                target.addEventListener('click', function() {
+                    if (!gameActive) return;
+                    
+                    // Atualiza pontuação
+                    const targetPoints = parseInt(target.dataset.points);
+                    score += targetPoints;
+                    scoreElement.textContent = score;
+                    
+                    // Animação de pontos
+                    const pointAnimation = document.createElement('div');
+                    pointAnimation.className = 'score-animation text-xl font-bold text-white';
+                    pointAnimation.textContent = `+${targetPoints}`;
+                    pointAnimation.style.left = `${left + targetSize/2}px`;
+                    pointAnimation.style.top = `${top}px`;
+                    gameArea.appendChild(pointAnimation);
+                    
+                    setTimeout(() => {
+                        if (pointAnimation.parentNode === gameArea) {
+                            gameArea.removeChild(pointAnimation);
+                        }
+                    }, 800);
+                    
+                    // Remove o alvo
+                    gameArea.removeChild(target);
+                    targets = targets.filter(t => t !== target);
+                });
+            }
+            
+            // Eventos para iniciar/reiniciar o jogo
+            startButton.addEventListener('click', startGame);
+            replayButton.addEventListener('click', startGame);
+            
+            // Desabilita o comportamento padrão de zoom e scroll
+            document.addEventListener('touchstart', function(e) {
+                if (e.touches.length > 1) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
+            
+            document.addEventListener('touchmove', function(e) {
+                if (e.touches.length > 1) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
+        });
+    </script>
+
+
+</body></html>
